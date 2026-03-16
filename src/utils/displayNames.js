@@ -41,6 +41,9 @@ const DISPLAY_NAME_OVERRIDES = {
   '24diet_productaddons': 'Product Add-ons',
   '24diet_productcategories': 'Product Categories',
   // Challenge
+  challenges: 'Challenges',
+  competition: 'Competition',
+  compitition: 'Competition',
   challenge_participants: 'Participants',
   challenge_rooms: 'Rooms',
   room_requests: 'Room Requests',

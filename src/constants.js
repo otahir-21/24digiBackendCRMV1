@@ -25,6 +25,19 @@ export const DIET_TABS = [
 
 export const ALL_PRODUCTS_VIEW = '__24diet_all__';
 
+/** View that shows all challenges from challenges/competition/compitition collection. */
+export const ALL_CHALLENGES_VIEW = '__24challenge_all__';
+
+/** Collection IDs to check for the 24 Challenge list (first existing one is used). */
+export const CHALLENGE_COLLECTION_IDS = ['challenges', 'competition', 'compitition'];
+
+/** 24 Competition module collections */
+export const COMPETITION_COLLECTIONS = [
+  'competitions',
+  'competition_notifications',
+  'running_competation_24_competition',
+];
+
 /** Only this module shows "All Products" and product catalog in the sidebar (others go under CRM sections). */
 export const PRODUCTS_MODULE_NAME = '24diet';
 
@@ -35,6 +48,8 @@ export const FIRESTORE_MODULES = [
     label: 'Challenge',
     collections: [
       'challenges',
+      'competition',
+      'compitition', // common typo – show in CRM if present in Firebase
       'challenge_participants',
       'challenge_rooms',
       'room_requests',
@@ -89,6 +104,7 @@ export const OTHER_LEGACY_COLLECTIONS = [
 export const ALL_FIRESTORE_COLLECTION_IDS = [
   ...DEFAULT_COLLECTIONS,
   ...DIET_COLLECTIONS,
+  ...COMPETITION_COLLECTIONS,
   ...FIRESTORE_MODULES.flatMap((m) => m.collections),
   ...OTHER_LEGACY_COLLECTIONS,
 ].filter((id, i, arr) => arr.indexOf(id) === i);

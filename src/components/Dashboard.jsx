@@ -1,271 +1,423 @@
-import { useState, useEffect, useMemo } from 'react';
-import { useFirestoreCollections, useCollectionData } from '../hooks/useFirestore';
-import { useAllProductsData } from '../hooks/useAllProductsData';
-import { getCollectionDisplayName, groupByModule, isModuleCollection } from '../utils/displayNames';
-import { ALL_PRODUCTS_VIEW, FIRESTORE_MODULES, PRODUCTS_MODULE_NAME } from '../constants';
+import { useState, useEffect, useCallback } from 'react';
+import { collection, getDocs } from 'firebase/firestore';
+import { db } from '../firebase/config';
+import { useCollectionData } from '../hooks/useFirestore';
+import { CHALLENGE_COLLECTION_IDS } from '../constants';
 import DashboardHeader from './DashboardHeader';
 import DataTable from './DataTable';
-import ProductsView from './ProductsView';
 import AddDocumentModal from './AddDocumentModal';
 import FirestoreSetupHelp from './FirestoreSetupHelp';
+import ChallengeSection from './ChallengeSection';
 import './Dashboard.css';
 
-const DB_ICON = (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-    <ellipse cx="12" cy="5" rx="9" ry="3" />
-    <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3" />
-    <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" />
-  </svg>
-);
+// ─── Navigation sections ───────────────────────────────────────────────────
+const SECTION = {
+  DASHBOARD: 'dashboard',
+  PROFILE: 'profile',
+  DIET: 'diet',
+  CHALLENGE: 'challenge',
+};
 
-export default function Dashboard() {
-  const [selectedCollection, setSelectedCollection] = useState(null);
-  const [expandedModules, setExpandedModules] = useState({});
-  const [addDocOpen, setAddDocOpen] = useState(false);
-  const [setupHelpOpen, setSetupHelpOpen] = useState(false);
-  const { collections, loading: collectionsLoading } = useFirestoreCollections();
-  const isProductsView = selectedCollection === ALL_PRODUCTS_VIEW;
-  const { data, loading: dataLoading, error, refetch } = useCollectionData(
-    isProductsView ? null : selectedCollection
-  );
-  const productsData = useAllProductsData();
+// 24Diet inner screens
+const DIET_SCREENS = [
+  {
+    id: '24diet_products',
+    label: 'Product Catalog',
+    icon: (
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z" />
+        <line x1="3" y1="6" x2="21" y2="6" />
+        <path d="M16 10a4 4 0 01-8 0" />
+      </svg>
+    ),
+  },
+  {
+    id: '24diet_productaddons',
+    label: 'Add-ons',
+    icon: (
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <circle cx="12" cy="12" r="10" />
+        <line x1="12" y1="8" x2="12" y2="16" />
+        <line x1="8" y1="12" x2="16" y2="12" />
+      </svg>
+    ),
+  },
+  {
+    id: '24diet_productcategories',
+    label: 'Categories',
+    icon: (
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <rect x="3" y="3" width="7" height="7" />
+        <rect x="14" y="3" width="7" height="7" />
+        <rect x="14" y="14" width="7" height="7" />
+        <rect x="3" y="14" width="7" height="7" />
+      </svg>
+    ),
+  },
+];
 
-  const allCollections = collections;
+// ─── Sidebar icons ─────────────────────────────────────────────────────────
+const ICONS = {
+  dashboard: (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <rect x="3" y="3" width="7" height="9" rx="1" />
+      <rect x="14" y="3" width="7" height="5" rx="1" />
+      <rect x="14" y="12" width="7" height="9" rx="1" />
+      <rect x="3" y="16" width="7" height="5" rx="1" />
+    </svg>
+  ),
+  profile: (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" />
+      <circle cx="9" cy="7" r="4" />
+      <path d="M23 21v-2a4 4 0 00-3-3.87" />
+      <path d="M16 3.13a4 4 0 010 7.75" />
+    </svg>
+  ),
+  diet: (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z" />
+      <path d="M12 6v6l4 2" />
+    </svg>
+  ),
+  challenge: (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
+    </svg>
+  ),
+};
 
-  const { productModuleItems, crmGroups, otherLegacy } = useMemo(() => {
-    const moduleCols = allCollections.filter(isModuleCollection);
-    const moduleMap = groupByModule(moduleCols);
-    const productModuleItems = (moduleMap[PRODUCTS_MODULE_NAME] || []);
-    const inAnyCrmModule = new Set(FIRESTORE_MODULES.flatMap((m) => m.collections));
-    const crmGroups = FIRESTORE_MODULES.map((mod) => ({
-      ...mod,
-      collections: mod.collections.filter((c) => allCollections.includes(c)),
-    })).filter((g) => g.collections.length > 0);
-    const is24diet = (c) => c.startsWith('24diet_');
-    const otherLegacy = allCollections.filter(
-      (c) => !inAnyCrmModule.has(c) && !is24diet(c) && c !== 'products'
+// ─── Dashboard stats hook ──────────────────────────────────────────────────
+function useDashboardStats() {
+  const [stats, setStats] = useState({
+    users: null,
+    challenges: null,
+    dietProducts: null,
+    payments: null,
+    challengeCollection: null,
+    loading: true,
+  });
+
+  const fetch = useCallback(async () => {
+    setStats((s) => ({ ...s, loading: true }));
+    const targets = ['users', '24diet_products', 'payments', ...CHALLENGE_COLLECTION_IDS];
+
+    const results = await Promise.allSettled(
+      targets.map((name) =>
+        getDocs(collection(db, name)).then((snap) => ({ name, count: snap.size }))
+      )
     );
-    return { productModuleItems, crmGroups, otherLegacy };
-  }, [allCollections]);
 
-  const hasProductsSection = productModuleItems.length > 0;
+    const counts = { users: 0, dietProducts: 0, payments: 0, challenges: 0, challengeCollection: null };
 
-  useEffect(() => {
-    if (selectedCollection) return;
-    if (hasProductsSection) {
-      setSelectedCollection(ALL_PRODUCTS_VIEW);
-      setExpandedModules({ [PRODUCTS_MODULE_NAME]: true });
-    } else if (allCollections.includes('users')) {
-      setSelectedCollection('users');
-    } else {
-      const firstCrm = crmGroups[0]?.collections?.[0] || otherLegacy[0];
-      if (firstCrm) setSelectedCollection(firstCrm);
+    for (const r of results) {
+      if (r.status !== 'fulfilled') continue;
+      const { name, count } = r.value;
+      if (name === 'users') counts.users = count;
+      else if (name === '24diet_products') counts.dietProducts = count;
+      else if (name === 'payments') counts.payments = count;
+      else if (CHALLENGE_COLLECTION_IDS.includes(name) && count > 0 && !counts.challengeCollection) {
+        counts.challenges = count;
+        counts.challengeCollection = name;
+      }
     }
-  }, [selectedCollection, hasProductsSection, allCollections, crmGroups, otherLegacy]);
 
-  const toggleModule = (moduleName) => {
-    setExpandedModules((prev) => ({ ...prev, [moduleName]: !prev[moduleName] }));
-  };
+    setStats({ ...counts, loading: false });
+  }, []);
 
-  const loading = collectionsLoading || dataLoading;
+  useEffect(() => { fetch(); }, [fetch]);
+
+  return { ...stats, refetch: fetch };
+}
+
+// ─── Overview bar chart (pure SVG) ────────────────────────────────────────
+function BarChart({ data }) {
+  const max = Math.max(...data.map((d) => d.value), 1);
+  const H = 120;
+  const BAR_W = 48;
+  const GAP = 28;
+  const total = data.length;
+  const svgW = total * (BAR_W + GAP) - GAP + 16;
+
+  return (
+    <svg width={svgW} height={H + 40} className="bar-chart-svg">
+      {data.map((d, i) => {
+        const barH = Math.max(4, (d.value / max) * H);
+        const x = i * (BAR_W + GAP);
+        const y = H - barH;
+        return (
+          <g key={d.label}>
+            <rect x={x} y={y} width={BAR_W} height={barH} rx="6" fill={d.color} opacity="0.85" />
+            <text x={x + BAR_W / 2} y={y - 6} textAnchor="middle" fontSize="12" fontWeight="600" fill="#0f172a">
+              {d.value}
+            </text>
+            <text x={x + BAR_W / 2} y={H + 18} textAnchor="middle" fontSize="11" fill="#64748b">
+              {d.label}
+            </text>
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
+// ─── Dashboard overview view ──────────────────────────────────────────────
+function DashboardOverview() {
+  const { users, challenges, dietProducts, payments, loading, refetch } = useDashboardStats();
+
+  const statCards = [
+    { label: 'Total Users', value: users, color: '#3b82f6', bg: '#eff6ff', icon: ICONS.profile, desc: 'Registered profiles' },
+    { label: '24Diet Products', value: dietProducts, color: '#10b981', bg: '#ecfdf5', icon: ICONS.diet, desc: 'Active product catalog' },
+    { label: 'Challenges', value: challenges, color: '#f59e0b', bg: '#fffbeb', icon: ICONS.challenge, desc: 'Running competitions' },
+    { label: 'Payments', value: payments, color: '#8b5cf6', bg: '#f5f3ff', icon: ICONS.dashboard, desc: 'Total transactions' },
+  ];
+
+  const chartData = [
+    { label: 'Users', value: users ?? 0, color: '#3b82f6' },
+    { label: 'Diet Products', value: dietProducts ?? 0, color: '#10b981' },
+    { label: 'Challenges', value: challenges ?? 0, color: '#f59e0b' },
+    { label: 'Payments', value: payments ?? 0, color: '#8b5cf6' },
+  ];
+
+  return (
+    <div className="overview-root">
+      <div className="overview-header">
+        <div>
+          <h2>Dashboard Overview</h2>
+          <p className="overview-subtitle">Live snapshot from Firestore collections</p>
+        </div>
+        <button className="refresh-btn" onClick={refetch}>Refresh</button>
+      </div>
+
+      {/* Stat cards */}
+      <div className="stat-cards">
+        {statCards.map((card) => (
+          <div key={card.label} className="stat-card" style={{ borderTop: `3px solid ${card.color}` }}>
+            <div className="stat-card-icon" style={{ background: card.bg, color: card.color }}>
+              {card.icon}
+            </div>
+            <div className="stat-card-body">
+              <div className="stat-card-value" style={{ color: card.color }}>
+                {loading ? <span className="stat-skeleton" /> : (card.value ?? 0)}
+              </div>
+              <div className="stat-card-label">{card.label}</div>
+              <div className="stat-card-desc">{card.desc}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Bar chart */}
+      <div className="chart-card">
+        <div className="chart-card-header">
+          <h3>Collection Overview</h3>
+          <span className="chart-card-sub">Document counts per module</span>
+        </div>
+        <div className="chart-body">
+          {loading ? (
+            <div className="content-loading">Loading chart data…</div>
+          ) : (
+            <BarChart data={chartData} />
+          )}
+        </div>
+      </div>
+
+      {/* Quick links */}
+      <div className="quick-links-card">
+        <h3>Quick Navigation</h3>
+        <div className="quick-links-grid">
+          <div className="quick-link-item" style={{ borderLeft: '3px solid #3b82f6' }}>
+            <span className="ql-label">User Profiles</span>
+            <span className="ql-sub">Manage registered users</span>
+          </div>
+          <div className="quick-link-item" style={{ borderLeft: '3px solid #10b981' }}>
+            <span className="ql-label">24Diet Module</span>
+            <span className="ql-sub">Products, add-ons, categories</span>
+          </div>
+          <div className="quick-link-item" style={{ borderLeft: '3px solid #f59e0b' }}>
+            <span className="ql-label">24Challenge</span>
+            <span className="ql-sub">Challenges & competitions</span>
+          </div>
+          <div className="quick-link-item" style={{ borderLeft: '3px solid #8b5cf6' }}>
+            <span className="ql-label">Payments</span>
+            <span className="ql-sub">{loading ? '...' : `${payments ?? 0} transactions`}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Collection view (Profile / Diet screen / Challenge) ──────────────────
+function CollectionView({ collectionName, displayName, addDocLabel }) {
+  const [addDocOpen, setAddDocOpen] = useState(false);
+  const { data, loading, error, refetch } = useCollectionData(collectionName);
+
+  return (
+    <div>
+      <div className="content-header">
+        <div>
+          <h2>{displayName}</h2>
+          <div className="content-stats">
+            <span className="content-stat">
+              Total: <strong>{data?.length ?? 0}</strong> {data?.length === 1 ? 'record' : 'records'}
+            </span>
+          </div>
+        </div>
+        <div className="content-actions">
+          <button type="button" className="add-doc-btn" onClick={() => setAddDocOpen(true)}>
+            Add document
+          </button>
+          <button className="refresh-btn" onClick={refetch}>Refresh</button>
+        </div>
+      </div>
+
+      {error && <div className="content-error">{error}</div>}
+
+      {loading ? (
+        <div className="content-loading">Loading {displayName}…</div>
+      ) : data.length === 0 ? (
+        <div className="content-empty">
+          No documents in this collection.
+          <button type="button" className="add-doc-btn inline" onClick={() => setAddDocOpen(true)}>
+            Add first document
+          </button>
+        </div>
+      ) : (
+        <DataTable data={data} collectionName={collectionName} onUpdate={refetch} />
+      )}
+
+      {addDocOpen && (
+        <AddDocumentModal
+          collectionName={collectionName}
+          collectionDisplayName={addDocLabel || displayName}
+          onClose={() => setAddDocOpen(false)}
+          onSaved={() => { setAddDocOpen(false); refetch(); }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─── 24Diet view with sub-screen tabs ─────────────────────────────────────
+function DietView() {
+  const [activeScreen, setActiveScreen] = useState(DIET_SCREENS[0].id);
+  const screen = DIET_SCREENS.find((s) => s.id === activeScreen);
+
+  return (
+    <div>
+      <div className="sub-tabs">
+        {DIET_SCREENS.map((s) => (
+          <button
+            key={s.id}
+            className={`sub-tab-btn ${activeScreen === s.id ? 'active' : ''}`}
+            onClick={() => setActiveScreen(s.id)}
+          >
+            <span className="sub-tab-icon">{s.icon}</span>
+            {s.label}
+          </button>
+        ))}
+      </div>
+      <CollectionView
+        key={activeScreen}
+        collectionName={activeScreen}
+        displayName={screen.label}
+        addDocLabel={screen.label}
+      />
+    </div>
+  );
+}
+
+
+// ─── Main Dashboard ────────────────────────────────────────────────────────
+export default function Dashboard() {
+  const [section, setSection] = useState(SECTION.DASHBOARD);
+  const [dietExpanded, setDietExpanded] = useState(true);
+  const [setupHelpOpen, setSetupHelpOpen] = useState(false);
+
+  const navItems = [
+    { id: SECTION.DASHBOARD, label: 'Dashboard', icon: ICONS.dashboard },
+    { id: SECTION.PROFILE, label: 'Profile', icon: ICONS.profile },
+    { id: SECTION.DIET, label: '24Diet', icon: ICONS.diet, expandable: true },
+    { id: SECTION.CHALLENGE, label: '24Challenge', icon: ICONS.challenge },
+  ];
 
   return (
     <div className="dashboard">
       <DashboardHeader />
 
       <main className="dashboard-main">
+        {/* ── Sidebar ── */}
         <aside className="sidebar">
           <div className="sidebar-brand">
-            <span>24Digi</span>
+            <span className="brand-logo">24</span>
+            <span className="brand-name">Digi CRM</span>
           </div>
+
           <nav className="sidebar-nav">
-          {collectionsLoading ? (
-            <p className="sidebar-loading">Loading...</p>
-          ) : (
-            <>
-              {hasProductsSection && (
-                <>
-                  <h3 className="sidebar-section">Products</h3>
-                  <ul className="collection-list">
-                    <li className="module-group">
-                      <button
-                        className="module-header"
-                        onClick={() => toggleModule(PRODUCTS_MODULE_NAME)}
-                      >
-                        <span className="module-chevron">
-                          {expandedModules[PRODUCTS_MODULE_NAME] !== false ? '▼' : '▶'}
-                        </span>
-                        <span className="module-name">{PRODUCTS_MODULE_NAME}</span>
-                      </button>
-                      {expandedModules[PRODUCTS_MODULE_NAME] !== false && (
-                        <ul className="module-items">
-                          <li>
-                            <button
-                              className={`collection-btn ${selectedCollection === ALL_PRODUCTS_VIEW ? 'active' : ''}`}
-                              onClick={() => setSelectedCollection(ALL_PRODUCTS_VIEW)}
-                            >
-                              <span className="nav-icon">
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                                  <polyline points="14 2 14 8 20 8" />
-                                  <line x1="16" y1="13" x2="8" y2="13" />
-                                  <line x1="16" y1="17" x2="8" y2="17" />
-                                  <polyline points="10 9 9 9 8 9" />
-                                </svg>
-                              </span>
-                              All Products
-                            </button>
-                          </li>
-                          {productModuleItems.map((item) => (
-                            <li key={item.fullName}>
-                              <button
-                                className={`collection-btn ${selectedCollection === item.fullName ? 'active' : ''}`}
-                                onClick={() => setSelectedCollection(item.fullName)}
-                              >
-                                <span className="nav-icon">
-                                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                    <path d="M20 7h-9" />
-                                    <path d="M14 17H5" />
-                                    <circle cx="17" cy="17" r="3" />
-                                    <circle cx="7" cy="7" r="3" />
-                                  </svg>
-                                </span>
-                                {item.display}
-                              </button>
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-                    </li>
-                  </ul>
-                </>
-              )}
-              {crmGroups.map((group) => (
-                  <div key={group.id} className="module-group">
-                    <h3 className="sidebar-section">{group.label}</h3>
-                    <ul className="collection-list">
-                      {group.collections.map((col) => (
-                        <li key={col}>
-                          <button
-                            className={`collection-btn ${selectedCollection === col ? 'active' : ''}`}
-                            onClick={() => setSelectedCollection(col)}
-                          >
-                            <span className="nav-icon">{DB_ICON}</span>
-                            {getCollectionDisplayName(col)}
-                          </button>
+            <ul className="collection-list">
+              {navItems.map((item) => (
+                <li key={item.id}>
+                  <button
+                    className={`collection-btn ${section === item.id ? 'active' : ''}`}
+                    onClick={() => {
+                      setSection(item.id);
+                      if (item.expandable) setDietExpanded((v) => section === item.id ? !v : true);
+                    }}
+                  >
+                    <span className="nav-icon">{item.icon}</span>
+                    <span className="nav-label">{item.label}</span>
+                    {item.expandable && (
+                      <span className="nav-chevron">
+                        {section === SECTION.DIET && dietExpanded ? '▾' : '▸'}
+                      </span>
+                    )}
+                  </button>
+
+                  {/* 24Diet sub-items */}
+                  {item.expandable && section === SECTION.DIET && dietExpanded && (
+                    <ul className="module-items">
+                      {DIET_SCREENS.map((s) => (
+                        <li key={s.id}>
+                          <span className="sub-item-indicator">
+                            <span className="nav-icon">{s.icon}</span>
+                            {s.label}
+                          </span>
                         </li>
                       ))}
                     </ul>
-                  </div>
+                  )}
+                </li>
               ))}
-              {otherLegacy.length > 0 && (
-                <>
-                  <h3 className="sidebar-section">Other</h3>
-                  <ul className="collection-list">
-                    {otherLegacy.map((col) => (
-                      <li key={col}>
-                        <button
-                          className={`collection-btn ${selectedCollection === col ? 'active' : ''}`}
-                          onClick={() => setSelectedCollection(col)}
-                        >
-                          <span className="nav-icon">{DB_ICON}</span>
-                          {getCollectionDisplayName(col)}
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                </>
-              )}
-            </>
-          )}
+            </ul>
           </nav>
-          {allCollections.length === 0 && !collectionsLoading && (
-            <p className="sidebar-empty">No collections found.</p>
-          )}
+
           <div className="sidebar-footer">
             <button type="button" className="setup-help-btn" onClick={() => setSetupHelpOpen(true)}>
-              Firestore setup & how to create
+              Firestore setup help
             </button>
           </div>
         </aside>
 
+        {/* ── Content ── */}
         <section className="content">
-          {selectedCollection === ALL_PRODUCTS_VIEW ? (
-            <>
-              <div className="content-header">
-                <div>
-                  <h2>Products</h2>
-                  <div className="content-stats">
-                    <span className="content-stat">
-                      Total: <strong>{(productsData.allData || []).length}</strong> products
-                    </span>
-                  </div>
-                </div>
-                <button onClick={productsData.refetch} className="refresh-btn">Refresh</button>
-              </div>
-              <ProductsView {...productsData} />
-            </>
-          ) : selectedCollection && (
-            <>
-              <div className="content-header">
-                <div>
-                  <h2>{getCollectionDisplayName(selectedCollection)}</h2>
-                  <div className="content-stats">
-                    <span className="content-stat">
-                      Total: <strong>{data?.length ?? 0}</strong> {data?.length === 1 ? 'record' : 'records'}
-                    </span>
-                  </div>
-                </div>
-                <div className="content-actions">
-                  <button type="button" className="add-doc-btn" onClick={() => setAddDocOpen(true)}>
-                    Add document
-                  </button>
-                  <button onClick={refetch} className="refresh-btn">Refresh</button>
-                </div>
-              </div>
-
-              {error && <div className="content-error">{error}</div>}
-
-              {dataLoading ? (
-                <div className="content-loading">Loading data...</div>
-              ) : data.length === 0 ? (
-                <div className="content-empty">
-                  No documents in this collection.
-                  <button type="button" className="add-doc-btn inline" onClick={() => setAddDocOpen(true)}>Add first document</button>
-                </div>
-              ) : (
-                <DataTable
-                  data={data}
-                  collectionName={selectedCollection}
-                  onUpdate={refetch}
-                />
-              )}
-
-              {addDocOpen && (
-                <AddDocumentModal
-                  collectionName={selectedCollection}
-                  collectionDisplayName={getCollectionDisplayName(selectedCollection)}
-                  onClose={() => setAddDocOpen(false)}
-                  onSaved={() => { setAddDocOpen(false); refetch(); }}
-                />
-              )}
-            </>
-          )}
-
-          {setupHelpOpen && (
-            <FirestoreSetupHelp
-              collections={allCollections}
-              onClose={() => setSetupHelpOpen(false)}
+          {section === SECTION.DASHBOARD && <DashboardOverview />}
+          {section === SECTION.PROFILE && (
+            <CollectionView
+              key="users"
+              collectionName="users"
+              displayName="User Profiles"
+              addDocLabel="User"
             />
           )}
-
-          {!selectedCollection && !loading && (
-            <div className="content-placeholder">
-              <p>Select a collection from the sidebar to view your data.</p>
-            </div>
-          )}
+          {section === SECTION.DIET && <DietView />}
+          {section === SECTION.CHALLENGE && <ChallengeSection />}
         </section>
       </main>
+
+      {setupHelpOpen && (
+        <FirestoreSetupHelp collections={[]} onClose={() => setSetupHelpOpen(false)} />
+      )}
     </div>
   );
 }
