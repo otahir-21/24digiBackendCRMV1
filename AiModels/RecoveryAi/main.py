@@ -29,7 +29,16 @@ app.add_middleware(
 # Initialize database
 @app.on_event("startup")
 def startup():
-    models.Base.metadata.create_all(bind=models.create_engine(settings.DATABASE_URL))
+    from sqlalchemy import create_engine, text
+    engine = create_engine(settings.DATABASE_URL)
+    models.Base.metadata.create_all(bind=engine)
+    # Add firebase_uid to existing DBs (e.g. SQLite) if missing
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("ALTER TABLE users ADD COLUMN firebase_uid VARCHAR(128)"))
+            conn.commit()
+    except Exception:
+        pass
 
 # ==================== AUTHENTICATION ROUTES ====================
 
@@ -154,12 +163,41 @@ def resend_otp(
     
     return {"message": "OTP resent successfully"}
 
+
+# --------------------- Test token (for Postman / testing when app uses Firebase Phone Auth) ---------------------
+
+@app.post("/auth/test-token")
+def get_test_token(
+    request: Request,
+    db: Session = Depends(models.get_db)
+):
+    """
+    Get a Bearer token for testing (e.g. Postman) when your app uses Firebase Phone Auth.
+    Requires RECOVERY_AI_TEST_SECRET in .env and header X-Test-Secret.
+    Body: { "firebase_uid": "<uid-from-firebase>" }.
+    Returns JWT you can use as Authorization: Bearer <access_token>.
+    """
+    if not settings.RECOVERY_AI_TEST_SECRET:
+        raise HTTPException(status_code=503, detail="Test token is disabled (RECOVERY_AI_TEST_SECRET not set)")
+    secret = request.headers.get("X-Test-Secret")
+    if secret != settings.RECOVERY_AI_TEST_SECRET:
+        raise HTTPException(status_code=401, detail="Invalid or missing X-Test-Secret")
+    body = request.json() if request.body else {}
+    if not body or not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="JSON body required: { \"firebase_uid\": \"<uid>\" }")
+    firebase_uid = (body.get("firebase_uid") or "").strip()
+    if not firebase_uid:
+        raise HTTPException(status_code=400, detail="firebase_uid is required")
+    user = auth.get_or_create_user_by_firebase_uid(firebase_uid, db)
+    access_token = auth.create_access_token(data={"sub": str(user.user_id)})
+    return {"access_token": access_token, "token_type": "bearer"}
+
 # ==================== PROFILE ROUTES ====================
 
 @app.post("/profile", response_model=schemas.ProfileResponse)
 def create_profile(
     profile_data: schemas.ProfileCreate,
-    current_user: models.User = Depends(auth.get_current_user),
+    current_user: models.User = Depends(auth.get_current_user_firebase),
     db: Session = Depends(models.get_db)
 ):
     """Create user profile (onboarding)"""
@@ -209,7 +247,7 @@ def create_profile(
 
 @app.get("/profile", response_model=schemas.ProfileResponse)
 def get_profile(
-    current_user: models.User = Depends(auth.get_current_user),
+    current_user: models.User = Depends(auth.get_current_user_firebase),
     db: Session = Depends(models.get_db)
 ):
     """Get user profile"""
@@ -248,7 +286,7 @@ def get_profile(
 @app.put("/profile", response_model=schemas.ProfileResponse)
 def update_profile(
     profile_update: schemas.ProfileUpdate,
-    current_user: models.User = Depends(auth.get_current_user),
+    current_user: models.User = Depends(auth.get_current_user_firebase),
     db: Session = Depends(models.get_db)
 ):
     """Update user profile"""
@@ -297,7 +335,7 @@ def update_profile(
 @app.post("/subscriptions", response_model=schemas.SubscriptionResponse)
 def create_subscription(
     subscription_data: schemas.SubscriptionCreateRequest,
-    current_user: models.User = Depends(auth.get_current_user),
+    current_user: models.User = Depends(auth.get_current_user_firebase),
     db: Session = Depends(models.get_db)
 ):
     """Create subscription using Stripe"""
@@ -362,7 +400,7 @@ def create_subscription(
 
 @app.get("/subscriptions/current", response_model=Optional[schemas.SubscriptionResponse])
 def get_current_subscription(
-    current_user: models.User = Depends(auth.get_current_user),
+    current_user: models.User = Depends(auth.get_current_user_firebase),
     db: Session = Depends(models.get_db)
 ):
     """Get user's current active subscription"""
@@ -388,7 +426,7 @@ def get_current_subscription(
 @app.post("/subscriptions/{subscription_id}/cancel")
 def cancel_subscription(
     subscription_id: int,
-    current_user: models.User = Depends(auth.get_current_user),
+    current_user: models.User = Depends(auth.get_current_user_firebase),
     db: Session = Depends(models.get_db)
 ):
     """Cancel subscription"""
@@ -419,7 +457,7 @@ def cancel_subscription(
 @app.post("/issues", response_model=schemas.IssueSelectionResponse)
 def create_issue_selection(
     issue_data: schemas.IssueSelectionCreate,
-    current_user: models.User = Depends(auth.get_current_user),
+    current_user: models.User = Depends(auth.get_current_user_firebase),
     db: Session = Depends(models.get_db)
 ):
     """Create issue selection"""
@@ -449,7 +487,7 @@ def create_issue_selection(
 @app.post("/plans", response_model=schemas.RecoveryPlanResponse)
 def create_recovery_plan(
     plan_request: schemas.RecoveryPlanCreate,
-    current_user: models.User = Depends(auth.get_current_user),
+    current_user: models.User = Depends(auth.get_current_user_firebase),
     db: Session = Depends(models.get_db)
 ):
     """
@@ -544,7 +582,7 @@ def create_recovery_plan(
 @app.get("/plans/{plan_id}", response_model=schemas.RecoveryPlanResponse)
 def get_plan(
     plan_id: int,
-    current_user: models.User = Depends(auth.get_current_user),
+    current_user: models.User = Depends(auth.get_current_user_firebase),
     db: Session = Depends(models.get_db)
 ):
     """Get recovery plan by ID"""
@@ -573,7 +611,7 @@ def get_plan(
 
 @app.get("/plans", response_model=List[schemas.RecoveryPlanResponse])
 def get_all_plans(
-    current_user: models.User = Depends(auth.get_current_user),
+    current_user: models.User = Depends(auth.get_current_user_firebase),
     db: Session = Depends(models.get_db)
 ):
     """Get all user's recovery plans"""
@@ -603,7 +641,7 @@ def get_all_plans(
 @app.post("/checkins", response_model=schemas.DailyCheckinResponse)
 def create_checkin(
     checkin_data: schemas.DailyCheckinCreate,
-    current_user: models.User = Depends(auth.get_current_user),
+    current_user: models.User = Depends(auth.get_current_user_firebase),
     db: Session = Depends(models.get_db)
 ):
     """
@@ -708,7 +746,7 @@ def create_checkin(
 @app.get("/checkins/plan/{plan_id}", response_model=List[schemas.DailyCheckinResponse])
 def get_plan_checkins(
     plan_id: int,
-    current_user: models.User = Depends(auth.get_current_user),
+    current_user: models.User = Depends(auth.get_current_user_firebase),
     db: Session = Depends(models.get_db)
 ):
     """Get all check-ins for a plan with their daily summaries"""
@@ -738,7 +776,7 @@ def get_plan_checkins(
 @app.get("/checkins/{checkin_id}/summary")
 def get_checkin_summary(
     checkin_id: int,
-    current_user: models.User = Depends(auth.get_current_user),
+    current_user: models.User = Depends(auth.get_current_user_firebase),
     db: Session = Depends(models.get_db)
 ):
     """Get just the daily summary for a specific check-in"""
@@ -762,7 +800,7 @@ def get_checkin_summary(
 @app.get("/plans/{plan_id}/completion-summary")
 def get_completion_summary(
     plan_id: int,
-    current_user: models.User = Depends(auth.get_current_user),
+    current_user: models.User = Depends(auth.get_current_user_firebase),
     db: Session = Depends(models.get_db)
 ):
     """Get the completion summary for a finished plan"""
@@ -811,7 +849,7 @@ def get_completion_summary(
 @app.get("/plans/{plan_id}/progress-summary")
 def get_progress_summary(
     plan_id: int,
-    current_user: models.User = Depends(auth.get_current_user),
+    current_user: models.User = Depends(auth.get_current_user_firebase),
     db: Session = Depends(models.get_db)
 ):
     """Get a progress summary for an active plan"""
@@ -873,7 +911,7 @@ def get_progress_summary(
 @app.post("/metrics", response_model=schemas.DailyMetricResponse)
 def create_or_update_metric(
     metric_data: schemas.DailyMetricCreate,
-    current_user: models.User = Depends(auth.get_current_user),
+    current_user: models.User = Depends(auth.get_current_user_firebase),
     db: Session = Depends(models.get_db)
 ):
     """Create or update daily metric"""
@@ -919,7 +957,7 @@ def create_or_update_metric(
 @app.get("/metrics", response_model=List[schemas.DailyMetricResponse])
 def get_metrics(
     days: int = 30,
-    current_user: models.User = Depends(auth.get_current_user),
+    current_user: models.User = Depends(auth.get_current_user_firebase),
     db: Session = Depends(models.get_db)
 ):
     """Get user's daily metrics"""

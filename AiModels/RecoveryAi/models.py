@@ -26,6 +26,7 @@ class User(Base):
     __tablename__ = "users"
     
     user_id = Column(Integer, primary_key=True, index=True)
+    firebase_uid = Column(String(128), unique=True, nullable=True, index=True)  # Firebase Auth UID; links to Firebase user
     email = Column(String, unique=True, nullable=True, index=True)
     mobile_number = Column(String, unique=True, nullable=True, index=True)
     otp_hash = Column(String, nullable=True)

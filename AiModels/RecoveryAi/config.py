@@ -33,6 +33,13 @@ class Settings(BaseSettings):
     TWILIO_AUTH_TOKEN: str = ""
     TWILIO_PHONE_NUMBER: str = ""
     
+    # Firebase (for Auth – verify ID tokens and map to User)
+    FIREBASE_CREDENTIALS_JSON: str = ""  # JSON string of service account key, or leave empty to use GOOGLE_APPLICATION_CREDENTIALS path
+    GOOGLE_APPLICATION_CREDENTIALS: str = ""  # Path to service account JSON file (optional if FIREBASE_CREDENTIALS_JSON set)
+    
+    # Test token (optional): set RECOVERY_AI_TEST_SECRET to allow POST /auth/test-token for Postman/testing
+    RECOVERY_AI_TEST_SECRET: str = ""
+    
     class Config:
         env_file = ".env"
         case_sensitive = True
