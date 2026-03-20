@@ -167,7 +167,7 @@ def resend_otp(
 # --------------------- Test token (for Postman / testing when app uses Firebase Phone Auth) ---------------------
 
 @app.post("/auth/test-token")
-def get_test_token(
+async def get_test_token(
     request: Request,
     db: Session = Depends(models.get_db)
 ):
@@ -182,7 +182,7 @@ def get_test_token(
     secret = request.headers.get("X-Test-Secret")
     if secret != settings.RECOVERY_AI_TEST_SECRET:
         raise HTTPException(status_code=401, detail="Invalid or missing X-Test-Secret")
-    body = request.json() if request.body else {}
+    body = await request.json() if request.body else {}
     if not body or not isinstance(body, dict):
         raise HTTPException(status_code=400, detail="JSON body required: { \"firebase_uid\": \"<uid>\" }")
     firebase_uid = (body.get("firebase_uid") or "").strip()
