@@ -1,9 +1,11 @@
 """Firebase ID token verification for Fitness API (Flutter)."""
+import secrets
 from typing import Annotated, Optional
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
+from config import get_settings
 from firebase_app import init_firebase
 
 security = HTTPBearer(auto_error=False)
@@ -36,7 +38,24 @@ async def require_firebase_user(
             detail="Missing Authorization Bearer token (Firebase ID token).",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    decoded = _verify_firebase_token(credentials.credentials)
+    token = credentials.credentials
+    settings = get_settings()
+    test_bearer = (settings.FITNESS_API_TEST_BEARER or "").strip()
+    if test_bearer:
+        try:
+            if secrets.compare_digest(
+                token.encode("utf-8"),
+                test_bearer.encode("utf-8"),
+            ):
+                return {
+                    "uid": settings.FITNESS_API_TEST_UID or "postman_test_user",
+                    "email": "test@fitness-api.local",
+                    "test_bearer": True,
+                }
+        except Exception:
+            pass
+
+    decoded = _verify_firebase_token(token)
     if not decoded or not decoded.get("uid"):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

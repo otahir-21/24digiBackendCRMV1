@@ -20,6 +20,12 @@ class Settings(BaseSettings):
     # Optional: override OpenAI model (default gpt-3.5-turbo to match Streamlit app)
     OPENAI_MODEL: str = "gpt-3.5-turbo"
 
+    # Dev/Postman only: if set, Authorization: Bearer <this exact value> acts as a fake user
+    # (no Firebase). Do NOT use a weak value in production; leave empty to disable.
+    FITNESS_API_TEST_BEARER: str = ""
+    # Synthetic Firebase uid used when FITNESS_API_TEST_BEARER matches (Firestore path)
+    FITNESS_API_TEST_UID: str = "postman_test_user"
+
 
 @lru_cache
 def get_settings() -> Settings:

@@ -87,12 +87,15 @@ def _context_from_user(uid: str) -> str:
 
 @app.get("/health")
 def health():
+    s = get_settings()
+    test_on = bool((s.FITNESS_API_TEST_BEARER or "").strip())
     return {
         "status": "ok",
         "service": "fitness-api",
         "firebase_initialized": init_firebase(),
         "firestore": firestore_available(),
-        "openai_configured": bool(get_settings().OPENAI_API_KEY),
+        "openai_configured": bool(s.OPENAI_API_KEY),
+        "test_bearer_auth_enabled": test_on,
     }
 
 
